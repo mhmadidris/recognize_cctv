@@ -1300,7 +1300,7 @@ class EventVisitorServiceManager:
             events = db.query(Event).all()
 
         for event in events:
-            if not event.company_id or not event.event_start:
+            if not event.company_id or not event.event_date or not event.event_start or not event.auto_run:
                 continue
             try:
                 start_time = datetime_time.fromisoformat(event.event_start)
@@ -1311,6 +1311,8 @@ class EventVisitorServiceManager:
             service = self.for_event(str(event.company_id), str(event.id))
             local_timezone = resolve_timezone(service.timezone_name())
             now = datetime.now(local_timezone)
+            if now.date() != event.event_date:
+                continue
             current_time = now.time()
             service._load_settings()
             latest = service.store.latest_session_for_event(event.id)
