@@ -40,6 +40,15 @@ class TestEventVisitorPersistence(TestCase):
         self.assertEqual(status["model_tier"], "s")
         self.assertFalse(status["running"])
 
+    def test_status_does_not_report_persisted_active_session_as_running(self):
+        service = EventVisitorService(self.store, event_id="11111111-1111-1111-1111-111111111111")
+        service.store.latest_session_for_event = Mock(return_value=Mock(status="active"))
+
+        status = service.get_status()
+
+        self.assertFalse(status["running"])
+        self.assertEqual(status["status"], "stopped")
+
     def test_failed_setting_save_does_not_change_runtime(self):
         service = EventVisitorService(self.store)
         service.set_line_position(0.6)
