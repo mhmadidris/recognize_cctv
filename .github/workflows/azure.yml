@@ -60,6 +60,11 @@ jobs:
 
             echo "Deploying branch: $DEPLOY_BRANCH"
 
+            if ! docker network inspect apigateway_internal_network >/dev/null 2>&1; then
+              echo "Creating missing Docker network: apigateway_internal_network"
+              docker network create apigateway_internal_network
+            fi
+
             docker compose --env-file environment/.env.staging build --pull recognize_cctv
             docker compose --env-file environment/.env.staging run --rm recognize_cctv alembic upgrade heads
             docker compose --env-file environment/.env.staging up -d --remove-orphans
