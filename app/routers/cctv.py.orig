@@ -1,0 +1,300 @@
+import time
+from datetime import date
+from uuid import UUID
+
+from fastapi import APIRouter, HTTPException, Depends, Query, Body
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
+from app.services.cctv_recognition import Settings, cctv_recognition_service
+from app.services.rabbitmq import RabbitMQPublishError
+from app.utils.response import success_response
+from app.utils.database import get_db
+from app.daos.cctv import AttendanceCCTVDAO, CCTVCameraDAO, CCTVCompanySettingDAO
+from app.schemas.cctv import (
+    CCTVCameraSourceUpdate,
+    CCTVCompanySettingUpdate,
+    CCTVStartRequest,
+    WorkinAttendanceResponse,
+)
+
+
+router = APIRouter()
+
+
+@router.get("/config")
+async def cctv_config():
+    return success_response(
+        message="CCTV runtime configuration.",
+        result={
+            "company_id": Settings.company_id or None,
+            "attendance_policy_enabled": bool(Settings.attendance_policy_url),
+        },
+    )
+
+
+@router.post("/start")
+async def start_cctv_recognition(
+    start_data: CCTVStartRequest | None = Body(default=None),
+    camera_id: UUID | None = Query(default=None),
+):
+    resolved_camera_id = start_data.camera_id if start_data and start_data.camera_id else camera_id
+    try:
+        if resolved_camera_id:
+            result = cctv_recognition_service.start(
+                camera_id=resolved_camera_id,
+                employee_id=start_data.employee_id if start_data else None,
+            )
+        else:
+            result = cctv_recognition_service.start_system()
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RabbitMQPublishError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+    return success_response(
+        message="CCTV recognition worker is starting.",
+        result=result,
+    )
+
+
+@router.post("/prepare")
+async def prepare_cctv_recognition():
+    return success_response(
+        message="CCTV recognition runtime is preparing.",
+        result=cctv_recognition_service.prepare_system(),
+    )
+
+
+@router.post("/workin/attendance/in/response")
+async def receive_workin_attendance_in_response(response_data: WorkinAttendanceResponse):
+    return success_response(
+        message="Workin check-in response received.",
+        result=cctv_recognition_service.record_workin_response("in", response_data.model_dump(mode="json")),
+    )
+
+
+@router.post("/workin/attendance/out/response")
+async def receive_workin_attendance_out_response(response_data: WorkinAttendanceResponse):
+    return success_response(
+        message="Workin check-out response received.",
+        result=cctv_recognition_service.record_workin_response("out", response_data.model_dump(mode="json")),
+    )
+
+
+@router.post("/stop")
+async def stop_cctv_recognition(camera_id: UUID | None = Query(default=None)):
+    return success_response(
+        message="CCTV recognition worker stopped.",
+        result=(
+            cctv_recognition_service.stop(camera_id=camera_id)
+            if camera_id
+            else cctv_recognition_service.stop_system()
+        ),
+    )
+
+
+@router.get("/status")
+async def cctv_recognition_status(camera_id: UUID | None = Query(default=None)):
+    return success_response(
+        message="CCTV recognition worker status.",
+        result=cctv_recognition_service.status(camera_id=camera_id),
+    )
+
+
+@router.post("/source")
+async def update_cctv_camera_source(source_data: CCTVCameraSourceUpdate):
+    try:
+        result = cctv_recognition_service.set_camera_source(
+            source_data.camera_source,
+            camera_id=source_data.camera_id,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    return success_response(
+        message="CCTV camera source updated.",
+        result=result,
+    )
+
+
+@router.get("/source/{company_id}")
+async def get_company_camera_source(company_id: UUID, db: Session = Depends(get_db)):
+    camera = CCTVCameraDAO.get_by_company_id(db, company_id)
+    if camera and str(company_id) == str(cctv_recognition_service.status()["company_id"]):
+        cctv_recognition_service.set_camera_source(camera.rtsp_url, camera_id=camera.id)
+
+    return success_response(
+        message="Company CCTV camera source retrieved.",
+        result=_serialize_camera(camera) if camera else None,
+    )
+
+
+@router.post("/source/{company_id}")
+async def update_company_camera_source(
+    company_id: UUID,
+    source_data: CCTVCameraSourceUpdate,
+    db: Session = Depends(get_db),
+):
+    camera_source = source_data.camera_source.strip()
+    if not camera_source:
+        raise HTTPException(status_code=422, detail="Camera source cannot be empty.")
+
+    try:
+        camera = CCTVCameraDAO.upsert_camera(
+            db,
+            company_id,
+            camera_source,
+            camera_id=source_data.camera_id,
+            name=source_data.name or "Default CCTV Camera",
+            branch_id=source_data.branch_id,
+            zone_type=source_data.zone_type or "attendance",
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    runtime_result = None
+    if str(company_id) == str(cctv_recognition_service.status()["company_id"]):
+        runtime_result = cctv_recognition_service.set_camera_source(camera_source, camera_id=camera.id)
+
+    return success_response(
+        message="Company CCTV camera source saved.",
+        result={
+            "camera": _serialize_camera(camera),
+            "runtime": runtime_result,
+        },
+    )
+
+
+@router.get("/stream")
+async def cctv_recognition_stream(camera_id: UUID | None = Query(default=None)):
+    status = cctv_recognition_service.status(camera_id=camera_id) if camera_id else cctv_recognition_service.status()
+    if not status["running"]:
+        raise HTTPException(
+            status_code=409,
+            detail="CCTV recognition worker is not running. Start it first with POST /api/v1/cctv/start.",
+        )
+
+    return StreamingResponse(
+        _frame_stream(camera_id=camera_id),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+@router.get("/attendance")
+async def get_attendance(source: str = "db", db: Session = Depends(get_db)):
+    if source == "session":
+        result=result,
+    )
+
+
+@router.get("/cameras/{company_id}")
+async def list_company_cameras(company_id: UUID, db: Session = Depends(get_db)):
+    cameras = CCTVCameraDAO.list_by_company_id(db, company_id)
+    return success_response(
+        message="Company CCTV cameras retrieved.",
+        result=[_serialize_camera(camera) for camera in cameras],
+    )
+
+
+@router.delete("/cameras/{company_id}/{camera_id}")
+async def delete_company_camera(
+    company_id: UUID,
+    camera_id: UUID,
+    db: Session = Depends(get_db),
+):
+    camera = CCTVCameraDAO.delete_by_id(db, company_id, camera_id)
+    if not camera:
+        raise HTTPException(status_code=404, detail="Camera not found.")
+
+    cctv_recognition_service.remove_camera(camera_id)
+
+    return success_response(
+        message="Company CCTV camera deleted.",
+        result={"id": str(camera_id)},
+    )
+
+
+@router.get("/settings/{company_id}")
+async def get_cctv_settings(company_id: UUID, db: Session = Depends(get_db)):
+    settings = CCTVCompanySettingDAO.get_by_company_id(db, company_id)
+    return success_response(
+        message="CCTV settings retrieved.",
+        result=_serialize_company_settings(
+            settings,
+            company_id=company_id,
+            is_first_setup=settings is None,
+        ),
+    )
+
+
+@router.post("/settings/{company_id}")
+async def update_cctv_settings(
+    company_id: UUID, 
+    settings_data: CCTVCompanySettingUpdate, 
+    db: Session = Depends(get_db)
+):
+    settings = CCTVCompanySettingDAO.update_settings(
+        db, 
+        company_id, 
+        settings_data.model_dump(exclude_unset=True)
+    )
+    runtime_result = None
+    if settings.enabled:
+        runtime_result = cctv_recognition_service.prepare_system()
+
+    result = _serialize_company_settings(settings)
+    result["runtime"] = runtime_result
+    return success_response(
+        message="CCTV settings updated successfully.",
+        result=result,
+    )
+
+
+def _serialize_company_settings(settings, company_id=None, is_first_setup=False) -> dict:
+    resolved_company_id = settings.company_id if settings else company_id
+    return {
+        "setting_id": str(settings.id) if settings else None,
+        "company_id": str(resolved_company_id) if resolved_company_id else None,
+        "setup_status": "not_setup" if is_first_setup else "configured",
+        "company_setting_exists": settings is not None,
+        "enabled": settings.enabled if settings else True,
+        "confidence_threshold": settings.confidence_threshold if settings else 0.75,
+        "cooldown_seconds": settings.cooldown_seconds if settings else 30,
+        "allow_attendance_after_tolerance": getattr(settings, "allow_attendance_after_tolerance", True) if settings else True,
+        "time_tolerance_minutes": getattr(settings, "time_tolerance_minutes", 0) if settings else 0,
+        "created_at": settings.created_at.isoformat() if settings and settings.created_at else None,
+        "updated_at": settings.updated_at.isoformat() if settings and settings.updated_at else None,
+    }
+
+
+def _serialize_camera(camera):
+    return {
+        "id": str(camera.id),
+        "company_id": str(camera.company_id),
+        "branch_id": str(camera.branch_id) if camera.branch_id else None,
+        "name": camera.name,
+        "camera_source": camera.rtsp_url,
+        "rtsp_url": camera.rtsp_url,
+        "zone_type": camera.zone_type,
+        "status": camera.status,
+        "last_online_at": camera.last_online_at.isoformat() if camera.last_online_at else None,
+        "created_at": camera.created_at.isoformat() if camera.created_at else None,
+        "updated_at": camera.updated_at.isoformat() if camera.updated_at else None,
+    }
+
+
+def _frame_stream(camera_id=None):
+    while True:
+        frame = cctv_recognition_service.latest_frame_jpeg(camera_id=camera_id)
+        if frame is None:
+            time.sleep(0.1)
+            continue
+
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n\r\n"
+            + frame
+            + b"\r\n"
+        )
+        time.sleep(0.03)

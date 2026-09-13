@@ -1,0 +1,43 @@
+services:
+  recognize_cctv:
+    container_name: recognize_cctv
+    build: .
+    cpus: 2.00
+    mem_limit: 6144m
+    mem_reservation: 3072m
+    pids_limit: 512
+    ports:
+      - "8004:8004"
+    restart: always
+    env_file:
+      - ./environment/.env.staging
+    environment:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+      VECLIB_MAXIMUM_THREADS: "1"
+      BLIS_NUM_THREADS: "1"
+      TF_NUM_INTRAOP_THREADS: "1"
+      TF_NUM_INTEROP_THREADS: "1"
+      UVICORN_WORKERS: "1"
+      FACE_INFERENCE_QUEUE_SIZE: "32"
+      FACE_INFERENCE_TIMEOUT: "120"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/api/v1/cctv/health', timeout=5)\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - ./face_datasets:/app/face_datasets
+      - ./logs:/app/logs
+      - ./vector_db:/app/vector_db
+    networks:
+      - apigateway_internal_network
+      - recognize_cctv_network
+
+networks:
+  recognize_cctv_network:
+  apigateway_internal_network:
+    external: true

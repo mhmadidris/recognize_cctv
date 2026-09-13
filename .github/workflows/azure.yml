@@ -1,0 +1,58 @@
+name: Deploy recognize_cctv to Azure
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: recognize-cctv-azure-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_BRANCH: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.ref_name }}
+      APP_DIR: ${{ secrets.AZURE_APP_DIR || '/home/apps/machine-learning/recognize_cctv' }}
+
+    steps:
+      - name: Check SSH port
+        run: |
+          timeout 15 bash -c "</dev/tcp/${{ secrets.AZURE_HOST }}/22"
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.AZURE_HOST }}
+          username: ${{ secrets.AZURE_USER }}
+          key: ${{ secrets.AZURE_SSH_KEY }}
+          command_timeout: 30m
+          envs: DEPLOY_BRANCH,APP_DIR
+          script: |
+            set -Eeuo pipefail
+
+            cd "$APP_DIR"
+            test -f .git/config
+            test -f environment/.env.staging
+
+            echo "Deploying branch: $DEPLOY_BRANCH"
+            git fetch --prune origin "$DEPLOY_BRANCH"
+            git checkout "$DEPLOY_BRANCH"
+            git pull --ff-only origin "$DEPLOY_BRANCH"
+
+            docker compose --env-file environment/.env.staging build --pull recognize_cctv
+            docker compose --env-file environment/.env.staging run --rm recognize_cctv alembic upgrade heads
+            docker compose --env-file environment/.env.staging up -d --remove-orphans
+            docker compose ps
+
+            for attempt in $(seq 1 20); do
+              if curl --fail --silent --show-error --max-time 10 \
+                http://127.0.0.1:8004/api/v1/cctv/health; then
+                echo "Azure deployment completed."
+                exit 0
+              fi
+              echo "Waiting for backend health ($attempt/20)..."
+              sleep 5
+            done
+
+            docker compose logs --tail=100 recognize_cctv
+            exit 1

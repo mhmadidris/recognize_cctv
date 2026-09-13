@@ -1,0 +1,70 @@
+{
+  "success": true,
+  "message": "Shift Assignments have been found",
+  "data": [
+    {
+      "id": "80165724-0aac-45a6-b30a-6291e7fb7ba8",
+      "start_date": "2026-09-01",
+      "end_date": "2026-09-01",
+      "ignore_holiday_date": false,
+      "status": "active",
+      "employee_id": "de58f36c-c243-45ad-b4ce-d792292945bc",
+      "company_id": "c8f745e0-aa6e-458b-bb70-4dda3e2accea",
+      "shift_type_id": "fdc0e462-6e00-4485-8bbe-cc0ad14537d3",
+      "shift_type_id_rel": {
+        "start_time": "09:00:00",
+        "end_time": "17:00:00",
+        "id": "fdc0e462-6e00-4485-8bbe-cc0ad14537d3",
+        "shift_type_name": "Morning Shift"
+      },
+      "employee_id_rel": {
+        "id": "de58f36c-c243-45ad-b4ce-d792292945bc",
+        "fullname": "Fajar GGWP",
+        "employee_id": "D-0050",
+        "company_id": "c8f745e0-aa6e-458b-bb70-4dda3e2accea"
+      },
+      "company_id_rel": {
+        "id": "c8f745e0-aa6e-458b-bb70-4dda3e2accea",
+        "company_name": "PT Rasa Aksata Nusantara",
+        "abbrev": "PRAN2"
+      }
+    },
+    {
+      "id": "58ae63a0-695d-4900-a10b-e4e7d000571a",
+      "start_date": "2026-07-01",
+      "end_date": "2026-09-30",
+      "ignore_holiday_date": true,
+      "status": "active",
+      "employee_id": "263d7965-4583-4231-8b98-18a27af1708d",
+      "company_id": "c8f745e0-aa6e-458b-bb70-4dda3e2accea",
+      "shift_type_id": "88d54cc0-2d34-4cef-b0b5-d6d6ec79a6fc",
+      "shift_type_id_rel": {
+        "start_time": "15:00:00",
+        "end_time": "23:00:00",
+        "id": "88d54cc0-2d34-4cef-b0b5-d6d6ec79a6fc",
+        "shift_type_name": "Evening Shift"
+      },
+      "employee_id_rel": {
+        "id": "263d7965-4583-4231-8b98-18a27af1708d",
+        "fullname": "Chat Chad",
+        "employee_id": "CHAT-0000",
+        "company_id": "c8f745e0-aa6e-458b-bb70-4dda3e2accea"
+      },
+      "company_id_rel": {
+        "id": "c8f745e0-aa6e-458b-bb70-4dda3e2accea",
+        "company_name": "PT Rasa Aksata Nusantara",
+        "abbrev": "PRAN2"
+      }
+    }
+  ],
+  "columns": ["id", "employee_id", "shift_type_id", "status", "company_id", "start_date", "end_date"],
+  "attributes": ["id", "start_date", "end_date", "ignore_holiday_date", "status", "employee_id", "company_id", "shift_type_id"],
+  "meta": {
+    "totalItems": 2,
+    "totalPages": 1,
+    "currentPage": 1,
+    "perPage": 20,
+    "hasNextPage": false,
+    "hasPrevPage": false
+  }
+}

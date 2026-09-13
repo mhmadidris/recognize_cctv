@@ -1,0 +1,78 @@
+name: Build and Deploy
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: recognize-cctv-staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Check SSH Port
+        run: |
+          echo "Checking SSH connectivity..."
+          timeout 15 bash -c "</dev/tcp/${{ secrets.SSH_HOST_DEV_NEW }}/22" \
+            && echo "Port 22 OPEN"
+
+      - name: Copy files to server
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST_DEV_NEW }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: ".,!node_modules,!venv,!.venv,!.env,!.env.*,!logs,!vector_db,!face_datasets"
+          target: "/home/apps/machine-learning/recognize_cctv"
+          overwrite: true
+          rm: false
+
+      - name: Build and Restart Docker on Server
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.SSH_HOST_DEV_NEW }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          command_timeout: 30m
+          script: |
+            set -e
+
+            cd /home/apps/machine-learning/recognize_cctv
+
+            if [ ! -f environment/.env.staging ]; then
+              echo "Missing environment/.env.staging on server. Create it manually before deploying."
+              exit 1
+            fi
+
+            echo "Current directory:"
+            pwd
+
+            echo "Docker version:"
+            docker --version
+
+            echo "Docker Compose version:"
+            docker compose version
+
+            echo "Building backend image..."
+            docker compose build recognize_cctv
+
+            echo "Applying database migrations..."
+            docker compose run --rm recognize_cctv alembic upgrade heads
+
+            echo "Starting containers..."
+            docker compose up -d
+
+            echo "Container status:"
+            docker compose ps
+
+            echo "Checking backend health..."
+            curl --fail --silent --show-error --retry 10 --retry-all-errors \
+              --retry-delay 3 --max-time 10 \
+              http://127.0.0.1:8004/api/v1/cctv/health
+
+            echo "Deployment completed."
