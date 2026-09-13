@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from html import escape
 from collections import Counter
 from sqlalchemy import func
@@ -26,16 +26,20 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 class EventCreateRequest(BaseModel):
     name: str
+    event_date: Optional[date] = None
     event_start: Optional[str] = None
     event_end: Optional[str] = None
+    auto_run: bool = True
     user_id: Optional[str] = None
     company_id: Optional[str] = None
 
 class EventResponse(BaseModel):
     id: str
     name: str
+    event_date: Optional[date]
     event_start: Optional[str]
     event_end: Optional[str]
+    auto_run: bool
     user_id: Optional[str]
     company_id: Optional[str]
     created_at: Optional[datetime]
@@ -48,8 +52,10 @@ def create_event(req: EventCreateRequest):
     with SessionLocal() as db:
         new_event = Event(
             name=req.name,
+            event_date=req.event_date,
             event_start=req.event_start,
             event_end=req.event_end,
+            auto_run=req.auto_run,
             user_id=req.user_id,
             company_id=req.company_id
         )
@@ -112,8 +118,10 @@ def list_events(company_id: Optional[str] = None):
             data.append({
                 "id": str(e.id),
                 "name": e.name,
+                "event_date": e.event_date.isoformat() if e.event_date else None,
                 "event_start": e.event_start,
                 "event_end": e.event_end,
+                "auto_run": e.auto_run,
                 "company_id": str(e.company_id) if e.company_id else None,
                 "created_at": e.created_at.isoformat() if e.created_at else None,
                 "status": session_status,
@@ -135,8 +143,10 @@ def update_event(event_id: str, req: EventCreateRequest, company_id: str | None 
             raise HTTPException(status_code=404, detail="Event not found")
 
         event.name = req.name.strip()
+        event.event_date = req.event_date
         event.event_start = req.event_start
         event.event_end = req.event_end
+        event.auto_run = req.auto_run
         db.commit()
         db.refresh(event)
         return success_response(
@@ -144,8 +154,10 @@ def update_event(event_id: str, req: EventCreateRequest, company_id: str | None 
             result={
                 "id": str(event.id),
                 "name": event.name,
+                "event_date": event.event_date.isoformat() if event.event_date else None,
                 "event_start": event.event_start,
                 "event_end": event.event_end,
+                "auto_run": event.auto_run,
             },
         )
 
