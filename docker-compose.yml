@@ -12,6 +12,7 @@ services:
     env_file:
       - ./environment/.env.staging
     environment:
+      TZ: Asia/Jakarta
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
       OPENBLAS_NUM_THREADS: "1"
@@ -24,7 +25,11 @@ services:
       FACE_INFERENCE_QUEUE_SIZE: "32"
       FACE_INFERENCE_TIMEOUT: "120"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/api/v1/cctv/health', timeout=5)\" || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:8004/api/v1/cctv/health'', timeout=5)" || exit 1',
+        ]
       interval: 30s
       timeout: 10s
       retries: 5

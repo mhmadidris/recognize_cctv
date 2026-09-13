@@ -536,7 +536,17 @@ class EventVisitorService:
                 status["status"] = "running"
             elif self.event_id:
                 latest_session = self.store.latest_session_for_event(self.event_id)
-                status["status"] = latest_session.status if latest_session and latest_session.status else "not_started"
+                latest_status = latest_session.status if latest_session else None
+                if latest_status == "completed":
+                    status["status"] = "completed"
+                elif latest_status == "paused":
+                    status["status"] = "paused"
+                elif latest_status:
+                    # The persistence model uses ``active`` for a created
+                    # session, but the worker is no longer running here.
+                    status["status"] = "stopped"
+                else:
+                    status["status"] = "not_started"
             else:
                 status["status"] = "not_started"
             status["similarity_threshold"] = getattr(self, "similarity_threshold", None)
