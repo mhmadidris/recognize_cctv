@@ -2,6 +2,15 @@ name: Deploy recognize_cctv to Azure
 
 on:
   workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to deploy
+        required: true
+        default: azure
+        type: string
+  push:
+    branches:
+      - azure
 
 concurrency:
   group: recognize-cctv-azure-deploy
@@ -15,9 +24,25 @@ jobs:
       APP_DIR: ${{ secrets.AZURE_APP_DIR || '/home/apps/machine-learning/recognize_cctv' }}
 
     steps:
+      - name: Checkout deployment branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_BRANCH }}
+
       - name: Check SSH port
         run: |
           timeout 15 bash -c "</dev/tcp/${{ secrets.AZURE_HOST }}/22"
+
+      - name: Copy source to Azure
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.AZURE_HOST }}
+          username: ${{ secrets.AZURE_USER }}
+          key: ${{ secrets.AZURE_SSH_KEY }}
+          source: ".,!node_modules,!venv,!.venv,!logs,!vector_db,!face_datasets"
+          target: ${{ secrets.AZURE_APP_DIR || '/home/apps/machine-learning/recognize_cctv' }}
+          overwrite: true
+          rm: false
 
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.5
@@ -31,13 +56,9 @@ jobs:
             set -Eeuo pipefail
 
             cd "$APP_DIR"
-            test -f .git/config
             test -f environment/.env.staging
 
             echo "Deploying branch: $DEPLOY_BRANCH"
-            git fetch --prune origin "$DEPLOY_BRANCH"
-            git checkout "$DEPLOY_BRANCH"
-            git pull --ff-only origin "$DEPLOY_BRANCH"
 
             docker compose --env-file environment/.env.staging build --pull recognize_cctv
             docker compose --env-file environment/.env.staging run --rm recognize_cctv alembic upgrade heads
